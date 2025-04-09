@@ -344,10 +344,7 @@ function initServer() {
             
             switch (args.operation) {
               case "send": {
-                if (!args.phoneNumber || !args.message) {
-                  throw new Error("Phone number and message are required for send operation");
-                }
-                await messageModule.sendMessage(args.phoneNumber, args.message);
+                await messageModule.sendMessage(args.phoneNumber!, args.message!);
                 return {
                   content: [{ type: "text", text: `Message sent to ${args.phoneNumber}` }],
                   isError: false
@@ -355,10 +352,12 @@ function initServer() {
               }
 
               case "read": {
-                if (!args.phoneNumber) {
-                  throw new Error("Phone number is required for read operation");
-                }
-                const messages = await messageModule.readMessages(args.phoneNumber, args.limit);
+                const messages = await messageModule.readMessages({
+                  phoneNumber: args.phoneNumber,
+                  limit: args.limit,
+                  fromDate: args.fromDate,
+                  toDate: args.toDate
+                });
                 return {
                   content: [{ 
                     type: "text", 
@@ -373,13 +372,10 @@ function initServer() {
               }
 
               case "schedule": {
-                if (!args.phoneNumber || !args.message || !args.scheduledTime) {
-                  throw new Error("Phone number, message, and scheduled time are required for schedule operation");
-                }
                 const scheduledMsg = await messageModule.scheduleMessage(
-                  args.phoneNumber,
-                  args.message,
-                  new Date(args.scheduledTime)
+                  args.phoneNumber!,
+                  args.message!,
+                  new Date(args.scheduledTime!)
                 );
                 return {
                   content: [{ 
@@ -1136,41 +1132,99 @@ function isNotesArgs(args: unknown): args is {
   return true;
 }
 
-function isMessagesArgs(args: unknown): args is {
+interface MessagesArgs {
   operation: "send" | "read" | "schedule" | "unread";
   phoneNumber?: string;
   message?: string;
+  fromDate?: string;
+  toDate?: string;
   limit?: number;
   scheduledTime?: string;
-} {
-  if (typeof args !== "object" || args === null) return false;
+}
   
-  const { operation, phoneNumber, message, limit, scheduledTime } = args as any;
-  
-  if (!operation || !["send", "read", "schedule", "unread"].includes(operation)) {
+function isMessagesArgs(args: unknown): args is MessagesArgs {
+  if (typeof args !== "object" || args === null) {
     return false;
   }
   
-  // Validate required fields based on operation
-  switch (operation) {
-    case "send":
-    case "schedule":
-      if (!phoneNumber || !message) return false;
-      if (operation === "schedule" && !scheduledTime) return false;
-      break;
-    case "read":
-      if (!phoneNumber) return false;
-      break;
-    case "unread":
-      // No additional required fields
-      break;
+  const opArgs = args as Partial<MessagesArgs>;
+
+  if (typeof opArgs.operation !== "string" || !["send", "read", "schedule", "unread"].includes(opArgs.operation)) {
+    return false;
   }
-  
-  // Validate field types if present
-  if (phoneNumber && typeof phoneNumber !== "string") return false;
-  if (message && typeof message !== "string") return false;
-  if (limit && typeof limit !== "number") return false;
-  if (scheduledTime && typeof scheduledTime !== "string") return false;
+  const operation = opArgs.operation;
+
+  if (operation === "send" || operation === "schedule") {
+    if (typeof opArgs.phoneNumber !== "string" || opArgs.phoneNumber === "") {
+      console.error("isMessagesArgs failed: Missing or invalid phoneNumber for", operation);
+      return false;
+    }
+    if (typeof opArgs.message !== "string" || opArgs.message === "") {
+       console.error("isMessagesArgs failed: Missing or invalid message for", operation);
+      return false;
+    }
+    if (operation === "schedule") {
+       if (typeof opArgs.scheduledTime !== "string" || opArgs.scheduledTime === "") {
+         console.error("isMessagesArgs failed: Missing or invalid scheduledTime for schedule");
+         return false;
+  }
+        if (isNaN(Date.parse(opArgs.scheduledTime))) {
+           console.error("isMessagesArgs failed: Invalid date format for scheduledTime");
+           return false;
+       }
+    }
+  }
+
+  if (opArgs.phoneNumber !== undefined && typeof opArgs.phoneNumber !== "string") {
+     console.error("isMessagesArgs failed: phoneNumber type invalid");
+     return false;
+  }
+  if (opArgs.message !== undefined && typeof opArgs.message !== "string") {
+     console.error("isMessagesArgs failed: message type invalid");
+     return false;
+  }
+  if (opArgs.limit !== undefined) {
+    if (typeof opArgs.limit !== "number" && typeof opArgs.limit !== "string") {
+       console.error("isMessagesArgs failed: limit type invalid");
+      return false;
+    }
+    if (typeof opArgs.limit === "string" && isNaN(parseInt(opArgs.limit, 10))) {
+        console.error("isMessagesArgs failed: limit string is not a number");
+        return false;
+    }
+  }
+  if (opArgs.scheduledTime !== undefined) {
+      if (typeof opArgs.scheduledTime !== "string") {
+        console.error("isMessagesArgs failed: scheduledTime type invalid");
+        return false;
+      }
+      if (isNaN(Date.parse(opArgs.scheduledTime))) {
+         console.error("isMessagesArgs failed: Invalid date format for scheduledTime (optional check)");
+         return false;
+      }
+  }
+
+  if (opArgs.fromDate !== undefined) {
+     if (typeof opArgs.fromDate !== "string") {
+        console.error("isMessagesArgs failed: fromDate type invalid");
+        return false;
+     }
+      if (isNaN(Date.parse(opArgs.fromDate))) {
+         console.error("isMessagesArgs failed: Invalid date format for fromDate");
+         return false;
+      }
+  }
+
+  if (opArgs.toDate !== undefined) {
+      if (typeof opArgs.toDate !== "string") {
+        console.error("isMessagesArgs failed: toDate type invalid");
+        return false;
+      }
+      if (isNaN(Date.parse(opArgs.toDate))) {
+         console.error("isMessagesArgs failed: Invalid date format for toDate");
+         return false;
+      }
+  }
   
   return true;
 }

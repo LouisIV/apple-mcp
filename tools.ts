@@ -59,11 +59,19 @@ const CONTACTS_TOOL: Tool = {
         },
         phoneNumber: {
           type: "string",
-          description: "Phone number to send message to (required for send, read, and schedule operations)"
+          description: "Phone number to interact with. Required for send and schedule operations. Optional for read operation (if omitted, reads from all)."
         },
         message: {
           type: "string",
           description: "Message to send (required for send and schedule operations)"
+        },
+        fromDate: {
+          type: "string",
+          description: "Start date for reading messages (ISO format, optional for read operation)"
+        },
+        toDate: {
+          type: "string",
+          description: "End date for reading messages (ISO format, optional for read operation)"
         },
         limit: {
           type: "number",

@@ -210,7 +210,17 @@ async function getAttachmentPaths(messageId: number): Promise<string[]> {
     }
 }
 
-async function readMessages(phoneNumber: string, limit = 10): Promise<Message[]> {
+interface ReadMessagesOptions {
+    phoneNumber?: string | null;
+    limit?: number;
+    fromDate?: string; // ISO date string
+    toDate?: string;   // ISO date string
+}
+
+async function readMessages(options?: ReadMessagesOptions): Promise<Message[]> {
+    const { phoneNumber, limit = 10, fromDate, toDate } = options || {};
+    const APPLE_EPOCH_SECONDS = 978307200; // January 1, 2001 00:00:00 UTC in seconds
+
     try {
         // Check database access with retries
         const hasAccess = await retryOperation(checkMessagesDBAccess);
@@ -218,12 +228,47 @@ async function readMessages(phoneNumber: string, limit = 10): Promise<Message[]>
             return [];
         }
 
-        // Get all possible formats of the phone number
-        const phoneFormats = normalizePhoneNumber(phoneNumber);
-        console.error("Trying phone formats:", phoneFormats);
+        let phoneFilterCondition = '';
+        if (phoneNumber) {
+            // Get all possible formats of the phone number
+            const phoneFormats = normalizePhoneNumber(phoneNumber);
+            console.error("Trying phone formats:", phoneFormats);
+            
+            // Create SQL IN clause with all phone number formats
+            const phoneList = phoneFormats.map(p => `'${p.replace(/'/g, "''")}'`).join(',');
+            phoneFilterCondition = `AND h.id IN (${phoneList})`;
+        }
         
-        // Create SQL IN clause with all phone number formats
-        const phoneList = phoneFormats.map(p => `'${p.replace(/'/g, "''")}'`).join(',');
+        // Build date conditions
+        let dateConditions = '';
+        if (fromDate) {
+            try {
+                const fromUnixMillis = Date.parse(fromDate);
+                if (!isNaN(fromUnixMillis)) {
+                    const fromUnixSeconds = fromUnixMillis / 1000;
+                    const fromNanos = (fromUnixSeconds - APPLE_EPOCH_SECONDS) * 1_000_000_000;
+                    dateConditions += ` AND m.date >= ${fromNanos}`;
+                } else {
+                    console.error(`Invalid fromDate format: ${fromDate}. Ignoring date filter.`);
+                }
+            } catch (e) {
+                 console.error(`Error parsing fromDate: ${fromDate}`, e);
+            }
+        }
+        if (toDate) {
+             try {
+                const toUnixMillis = Date.parse(toDate);
+                 if (!isNaN(toUnixMillis)) {
+                    const toUnixSeconds = toUnixMillis / 1000;
+                    const toNanos = (toUnixSeconds - APPLE_EPOCH_SECONDS) * 1_000_000_000;
+                    dateConditions += ` AND m.date <= ${toNanos}`;
+                } else {
+                    console.error(`Invalid toDate format: ${toDate}. Ignoring date filter.`);
+                }
+            } catch (e) {
+                 console.error(`Error parsing toDate: ${toDate}`, e);
+            }
+        }
         
         const query = `
             SELECT 
@@ -246,11 +291,12 @@ async function readMessages(phoneNumber: string, limit = 10): Promise<Message[]>
                 END as content_type
             FROM message m 
             INNER JOIN handle h ON h.ROWID = m.handle_id 
-            WHERE h.id IN (${phoneList})
-                AND (m.text IS NOT NULL OR m.attributedBody IS NOT NULL OR m.cache_has_attachments = 1)
+            WHERE (m.text IS NOT NULL OR m.attributedBody IS NOT NULL OR m.cache_has_attachments = 1)
                 AND m.is_from_me IS NOT NULL  -- Ensure it's a real message
                 AND m.item_type = 0  -- Regular messages only
                 AND m.is_audio_message = 0  -- Skip audio messages
+                ${phoneFilterCondition} -- Add phone number condition here
+                ${dateConditions} -- Add date conditions here
             ORDER BY m.date DESC 
             LIMIT ${limit}
         `;
@@ -261,7 +307,7 @@ async function readMessages(phoneNumber: string, limit = 10): Promise<Message[]>
         );
         
         if (!stdout.trim()) {
-            console.error("No messages found in database for the given phone number");
+            console.error(`No messages found in database${phoneNumber ? ' for the given phone number' : ''}`);
             return [];
         }
 
